@@ -12,7 +12,7 @@ CASA = Path(os.environ.get("CLIPPER_GTA6_HOME", Path.home() / "clipper-gta6"))
 TRABALHO = CASA / "trabalho"   # áudio, transcrição e trechos de cada live
 
 def obter_pasta_cortes():
-    """Detecta automaticamente o Google Drive de 4TB (unidade G:\ ou Meu Drive) ou usa CLIPPER_CORTES_DIR."""
+    r"""Detecta automaticamente o Google Drive de 4TB (unidade G:\ ou Meu Drive) ou usa CLIPPER_CORTES_DIR."""
     if "CLIPPER_CORTES_DIR" in os.environ:
         p = Path(os.environ["CLIPPER_CORTES_DIR"])
         p.mkdir(parents=True, exist_ok=True)
