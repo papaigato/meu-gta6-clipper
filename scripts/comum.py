@@ -84,6 +84,9 @@ def ytdlp():
     """yt-dlp do ambiente do clipper (sempre atualizado pelo setup) ou o do sistema."""
     local = Path(sys.executable).parent / ("yt-dlp.exe" if os.name == "nt" else "yt-dlp")
     cmd = [str(local)] if local.exists() else [sys.executable, "-m", "yt_dlp"]
+    ff_dir = Path(sys.executable).parent
+    if (ff_dir / "ffmpeg.exe").exists() or (ff_dir / "ffmpeg").exists():
+        cmd += ["--ffmpeg-location", str(ff_dir)]
     # o YouTube está passando a exigir um JavaScript pra liberar os formatos: o instalar põe o Deno no ambiente
     deno = Path(sys.executable).parent / ("deno.exe" if os.name == "nt" else "deno")
     if deno.exists():
