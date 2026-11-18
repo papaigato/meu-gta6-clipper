@@ -79,8 +79,13 @@ Execute:
 ```
 O script corta exatamente os trechos selecionados, utiliza visão computacional (YuNet) para encontrar a câmera do streamer, posiciona a webcam na metade superior, o gameplay na inferior, e gera a legenda embutida com fonte `Montserrat-ExtraBold`.
 
-### Passo 4: Entrega ao Usuário
-Ao finalizar, os cortes estarão salvos em:
-`C:\Users\<usuario>\clipper-gta6\cortes\<NOME>\`
-- `corte_01.mp4`: Vídeo 1080x1920 pronto para Reels / TikTok / Shorts.
+### Passo 4: Entrega ao Usuário e Armazenamento na Nuvem (Google Drive 4TB)
+Ao finalizar, os cortes são salvos diretamente na nuvem:
+- Se o **Google Drive para computador** estiver instalado (letra `G:\`), os vídeos vão automaticamente para:
+  `G:\Meu Drive\GTA6_Cortes\<NOME>\`
+- Caso contrário, ficam em `C:\Users\<usuario>\clipper-gta6\cortes\<NOME>\`.
+*(Você também pode definir uma pasta personalizada setando a variável de ambiente `$env:CLIPPER_CORTES_DIR` ou `$env:CLIPPER_GTA6_HOME`).*
+
+Arquivos gerados:
+- `corte_01.mp4`: Vídeo 1080x1920 pronto para Reels / TikTok / Shorts salvo na nuvem.
 - `corte_01.txt`: Texto da legenda da postagem com ganchos, CTA e hashtags.

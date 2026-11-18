@@ -10,7 +10,27 @@ from pathlib import Path
 
 CASA = Path(os.environ.get("CLIPPER_GTA6_HOME", Path.home() / "clipper-gta6"))
 TRABALHO = CASA / "trabalho"   # áudio, transcrição e trechos de cada live
-CORTES = CASA / "cortes"       # os vídeos prontos pra postar
+
+def obter_pasta_cortes():
+    """Detecta automaticamente o Google Drive de 4TB (unidade G:\ ou Meu Drive) ou usa CLIPPER_CORTES_DIR."""
+    if "CLIPPER_CORTES_DIR" in os.environ:
+        p = Path(os.environ["CLIPPER_CORTES_DIR"])
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    # Busca por unidades do Google Drive no Windows
+    for letra in ("G", "H", "I", "D", "E", "F"):
+        for sub in ("Meu Drive", "My Drive"):
+            raiz = Path(f"{letra}:/{sub}")
+            if raiz.exists():
+                pasta_drive = raiz / "GTA6_Cortes"
+                try:
+                    pasta_drive.mkdir(parents=True, exist_ok=True)
+                    return pasta_drive
+                except OSError:
+                    pass
+    return CASA / "cortes"
+
+CORTES = obter_pasta_cortes()
 MODELOS = CASA / "modelos"     # o detector de rosto (baixado no setup)
 YUNET = MODELOS / "face_detection_yunet_2023mar.onnx"
 YUNET_URL = ("https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/"
