@@ -1,6 +1,20 @@
 # Clipper do GTA 6
 
-Uma skill grátis pro Claude Code que transforma lives longas de streamers em cortes verticais prontos pra postar.
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/papaigato/meu-gta6-clipper/blob/main/GTA6_Clipper_Colab.ipynb)
+
+Uma skill grátis pro Claude Code e Antigravity que transforma lives longas de streamers em cortes verticais prontos pra postar.
+
+---
+
+## ⚡ Rodar no Google Colab (100% na Nuvem)
+
+Você pode rodar todo o processo na nuvem com **GPU Grátis (NVIDIA T4)**, sem usar a memória nem a CPU do seu computador, salvando os cortes direto no seu **Google Drive**:
+
+1. Clique no botão **Open in Colab** acima.
+2. Ative a GPU: menu **Ambiente de execução** → **Alterar tipo de ambiente de execução** → selecione **T4 GPU**.
+3. Execute as células passo a passo para conectar seu Drive e gerar os vídeos.
+
+---
 
 Você manda o link de uma live (YouTube, Twitch ou Kick), ou pede as maiores lives de GTA 6 do dia, e recebe:
 

@@ -129,7 +129,9 @@ def transcrever(pasta, modelo=None, idioma=None):
         if arq.exists():
             continue
         if m is None:
-            m = WhisperModel(modelo, device="cpu", compute_type="int8")
+            dispositivo = os.environ.get("CLIPPER_DEVICE", "auto")
+            computacao = os.environ.get("CLIPPER_COMPUTE_TYPE", "auto")
+            m = WhisperModel(modelo, device=dispositivo, compute_type=computacao)
         with wave.open(str(w)) as f:
             f.setpos(min(n, k * PEDACO * sr))
             a = np.frombuffer(f.readframes(PEDACO * sr), dtype=np.int16).astype(np.float32) / 32768
