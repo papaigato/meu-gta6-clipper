@@ -46,12 +46,8 @@ def ler_live(url):
                  "(atualiza o baixador) e tente de novo.")
     meta = json.loads(r.stdout)
     situacao = meta.get("live_status")
-    if situacao in ("is_live", "is_upcoming"):
-        sys.exit("\n  ✗ ESSA LIVE AINDA ESTÁ AO VIVO (ou nem começou).\n    Só dá pra cortar depois que ela acabar. "
-                 "Escolha uma live que já terminou (o 'buscar' mostra as de hoje que já acabaram).")
-    if situacao == "post_live":
-        sys.exit("\n  ✗ ESSA LIVE ACABOU AGORA e o site ainda está processando o vídeo.\n"
-                 "    Tente de novo daqui a algumas horas, ou escolha outra live.")
+    if situacao == "is_upcoming":
+        sys.exit("\n  ✗ ESSA LIVE AINDA NÃO COMEÇOU.\n    Escolha uma live que já terminou.")
     nome = slug(f"{meta.get('uploader') or meta.get('channel') or 'live'}-{meta.get('title', '')}")
     pasta = TRABALHO / nome
     pasta.mkdir(parents=True, exist_ok=True)
