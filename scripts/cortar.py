@@ -14,8 +14,8 @@ from comum import (CORTES, YUNET, YUNET_URL, gravar_json, hms, ler_json, rodar, 
 
 FONTES = Path(__file__).resolve().parent.parent / "fontes"
 L, A = 1080, 1920          # vídeo vertical
-CAM_H = 768                # faixa da câmera em cima
-JOGO_H = A - CAM_H         # faixa do jogo embaixo
+CAM_H = 590                # faixa da câmera em cima (30.7% da altura, estilo TikTok Grota Clips)
+JOGO_H = A - CAM_H         # faixa do jogo embaixo (69.3% da altura, 1330px)
 
 
 # ================================================================ escolher
@@ -182,20 +182,22 @@ def _par(v):
 
 
 def filtro(W, H, rosto):
-    if rosto is None:  # sem câmera: jogo inteiro no meio, fundo desfocado
+    estilo = os.environ.get("CLIPPER_ESTILO", "split").lower()
+    if rosto is None or estilo == "blur":
+        # Sem câmera ou estilo blur: jogo no meio, fundo desfocado
         return ("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=30:3[bg];"
                 "[0:v]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p,ass=legenda.ass:fontsdir=fontes[v]")
     fx, fy, fw, fh = rosto
-    cw = min(W, max(fw * 3.2, 200))
+    cw = min(W, max(fw * 4.2, 380))
     ch = cw * CAM_H / L
     if ch > H:
         ch, cw = H, H * L / CAM_H
     cx = min(max(fx + fw / 2 - cw / 2, 0), W - cw)
-    cy = min(max(fy + fh * 0.65 - ch / 2, 0), H - ch)
+    cy = min(max(fy + fh * 0.55 - ch / 2, 0), H - ch)
     gw = min(W, H * L / JOGO_H)
     gx = (W - gw) / 2
-    return (f"[0:v]crop={_par(cw)}:{_par(ch)}:{_par(cx)}:{_par(cy)},scale={L}:{CAM_H},setsar=1[cam];"
-            f"[0:v]crop={_par(gw)}:{_par(H)}:{_par(gx)}:0,scale={L}:{JOGO_H},setsar=1[jogo];"
+    return (f"[0:v]crop={_par(cw)}:{_par(ch)}:{_par(cx)}:{_par(cy)},scale={L}:{CAM_H}:flags=lanczos,unsharp=5:5:0.7:5:5:0.0,setsar=1[cam];"
+            f"[0:v]crop={_par(gw)}:{_par(H)}:{_par(gx)}:0,scale={L}:{JOGO_H}:flags=lanczos,setsar=1[jogo];"
             f"[cam][jogo]vstack=inputs=2,format=yuv420p,ass=legenda.ass:fontsdir=fontes[v]")
 
 
@@ -233,26 +235,45 @@ def palavras_do_trecho(video, idioma, modelo="small"):
         return [(w.start, w.end, w.word.strip()) for s in segs for w in (s.words or []) if w.word.strip()]
 
 
+def quebrar_titulo_banner(titulo, max_carac=24):
+    palavras = titulo.split()
+    linhas, atual = [], []
+    tam = 0
+    for p in palavras:
+        if tam + len(p) + (1 if atual else 0) > max_carac and atual:
+            linhas.append(" ".join(atual))
+            atual = [p]
+            tam = len(p)
+        else:
+            atual.append(p)
+            tam += len(p) + (1 if len(atual) > 1 else 0)
+    if atual:
+        linhas.append(" ".join(atual))
+    return r"\N".join(linhas)
+
+
 def escrever_ass(caminho, titulo, palavras, dur, com_camera):
-    y_titulo = CAM_H if com_camera else 520
-    y_leg = CAM_H + int(JOGO_H * 0.62) if com_camera else 1480
+    y_titulo = 670 if com_camera else 520
+    y_leg = 1620
+    titulo_formatado = quebrar_titulo_banner(_limpo(titulo).upper())
+    dur_gancho = min(3.8, dur)
     linhas = [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {L}", f"PlayResY: {A}", "WrapStyle: 0", "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, "
         "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
         "MarginL, MarginR, MarginV, Encoding",
-        "Style: Gancho,Montserrat ExtraBold,56,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,3,18,0,5,60,60,0,1",
-        "Style: Leg,Montserrat ExtraBold,80,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,7,3,5,40,40,0,1",
+        "Style: Gancho,Montserrat ExtraBold,50,&H00FFFFFF,&H00FFFFFF,&H000808D0,&H000808D0,-1,0,0,0,100,100,0,0,3,22,0,5,50,50,0,1",
+        "Style: Leg,Montserrat ExtraBold,72,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,8,2,2,40,40,180,1",
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-        f"Dialogue: 1,{_ass_tempo(0)},{_ass_tempo(dur)},Gancho,,0,0,0,,{{\\pos(540,{y_titulo})}}{_limpo(titulo).upper()}",
+        f"Dialogue: 1,0:00:00.00,{_ass_tempo(dur_gancho)},Gancho,,0,0,0,,{{\\fad(120,300)\\pos(540,{y_titulo})}}{titulo_formatado}",
     ]
     grupos = [palavras[i:i + 3] for i in range(0, len(palavras), 3)]
     for g, grupo in enumerate(grupos):
         prox = grupos[g + 1][0][0] if g + 1 < len(grupos) else dur
         for k, (s, e, _) in enumerate(grupo):
             fim = grupo[k + 1][0] if k + 1 < len(grupo) else (prox if prox - e < 0.6 else e + 0.25)
-            txt = " ".join(("{\\c&H00E5FF&}" if j == k else "{\\c&HFFFFFF&}") + _limpo(w).upper()
+            txt = " ".join(("{\\c&H0020FFFF&}" if j == k else "{\\c&HFFFFFF&}") + _limpo(w).upper()
                            for j, (_, _, w) in enumerate(grupo))
             linhas.append(f"Dialogue: 0,{_ass_tempo(s)},{_ass_tempo(fim)},Leg,,0,0,0,,{{\\pos(540,{y_leg})}}{txt}")
     Path(caminho).write_text("\n".join(linhas) + "\n", encoding="utf-8")
