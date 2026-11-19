@@ -4,6 +4,7 @@ Cada corte: câmera do streamer em cima, jogo embaixo, título de gancho, legend
 e um .txt com a legenda do post e as hashtags.
 """
 import json
+import os
 import re
 import shutil
 import subprocess
