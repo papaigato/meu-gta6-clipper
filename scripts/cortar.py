@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from comum import (CORTES, YUNET, gravar_json, hms, ler_json, rodar, segundos, ytdlp)  # noqa: F401
+from comum import (CORTES, YUNET, YUNET_URL, gravar_json, hms, ler_json, rodar, segundos, ytdlp)  # noqa: F401
 
 FONTES = Path(__file__).resolve().parent.parent / "fontes"
 L, A = 1080, 1920          # vídeo vertical
@@ -139,6 +139,16 @@ def achar_camera(video):
     import numpy as np
     cap = cv2.VideoCapture(str(video))
     W, H = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if not YUNET.exists():
+        YUNET.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            import urllib.request
+            urllib.request.urlretrieve(YUNET_URL, str(YUNET))
+        except Exception:
+            pass
+    if not YUNET.exists():
+        cap.release()
+        return W, H, None
     n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
     esc = 960 / W
     det = cv2.FaceDetectorYN.create(str(YUNET), "", (960, int(H * esc)), 0.75)
