@@ -74,10 +74,14 @@ def baixar_audio(pasta):
     url = info["url"]
     if not audio_pronto(pasta):
         print("\n[1/4] Baixando só o áudio da live (continua de onde parou se cair)…", flush=True)
-        rodar(ytdlp() + ["-f", "ba/b", "-x", "--no-playlist", "--no-warnings", "-q", "--progress", "--newline",
-                         "--progress-delta", "15", "--progress-template",
-                         "download:      baixado %(progress._percent_str)s", "--continue",
-                         "-o", str(pasta / "audio.%(ext)s"), url])
+        try:
+            rodar(ytdlp() + ["-f", "ba[ext=m4a]/140/ba/b", "-x", "--no-playlist", "--no-warnings", "-q", "--progress", "--newline",
+                             "--progress-delta", "15", "--progress-template",
+                             "download:      baixado %(progress._percent_str)s", "--continue",
+                             "-o", str(pasta / "audio.%(ext)s"), url])
+        except Exception:
+            rodar(ytdlp() + ["-f", "140/ba/b", "--no-playlist", "--no-warnings", "-q",
+                             "-o", str(pasta / "audio.%(ext)s"), url])
     if (info.get("extractor_key") or "").lower().startswith("youtube") and not (pasta / "chat.feito").exists():
         print("      pegando o replay do chat (se a live tiver)…", flush=True)
         try:
