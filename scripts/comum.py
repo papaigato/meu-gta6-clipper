@@ -80,6 +80,21 @@ def ffmpeg_embutido():
     return tem("ffmpeg") and tem("ffprobe")
 
 
+def buscar_cookies():
+    """Busca cookies do YouTube no Google Drive, no Colab ou configurados por variável."""
+    candidatos = [
+        os.environ.get("CLIPPER_COOKIES"),
+        Path("/content/drive/MyDrive/cookies.txt"),
+        Path("/content/drive/MyDrive/GTA6_Cortes/cookies.txt"),
+        Path("/content/cookies.txt"),
+        Path.home() / "cookies.txt",
+    ]
+    for c in candidatos:
+        if c and Path(c).is_file():
+            return Path(c)
+    return None
+
+
 def ytdlp():
     """yt-dlp do ambiente do clipper (sempre atualizado pelo setup) ou o do sistema."""
     local = Path(sys.executable).parent / ("yt-dlp.exe" if os.name == "nt" else "yt-dlp")
@@ -93,6 +108,13 @@ def ytdlp():
         cmd += ["--js-runtimes", f"deno:{deno}"]
     elif tem("deno") or tem("node"):
         cmd += ["--js-runtimes", "deno" if tem("deno") else "node"]
+    
+    # Cookies ou fallback de clientes para evitar bloqueio de bot em nuvem (Colab)
+    cookies = buscar_cookies()
+    if cookies:
+        cmd += ["--cookies", str(cookies)]
+    else:
+        cmd += ["--extractor-args", "youtube:player_client=android,mweb,web"]
     return cmd
 
 
