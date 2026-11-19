@@ -131,11 +131,22 @@ def transcrever(pasta, modelo=None, idioma=None):
         if m is None:
             dispositivo = os.environ.get("CLIPPER_DEVICE", "auto")
             computacao = os.environ.get("CLIPPER_COMPUTE_TYPE", "auto")
-            m = WhisperModel(modelo, device=dispositivo, compute_type=computacao)
+            try:
+                m = WhisperModel(modelo, device=dispositivo, compute_type=computacao)
+            except Exception:
+                m = WhisperModel(modelo, device="cpu", compute_type="int8")
         with wave.open(str(w)) as f:
             f.setpos(min(n, k * PEDACO * sr))
             a = np.frombuffer(f.readframes(PEDACO * sr), dtype=np.int16).astype(np.float32) / 32768
-        segs, inf = m.transcribe(a, language=lingua, vad_filter=True, beam_size=1, condition_on_previous_text=False)
+        try:
+            segs, inf = m.transcribe(a, language=lingua, vad_filter=True, beam_size=1, condition_on_previous_text=False)
+        except RuntimeError as e:
+            if "libcublas" in str(e).lower() or "cuda" in str(e).lower():
+                print("      [Ajustando biblioteca CUDA para transcrição...]", flush=True)
+                m = WhisperModel(modelo, device="cpu", compute_type="int8")
+                segs, inf = m.transcribe(a, language=lingua, vad_filter=True, beam_size=1, condition_on_previous_text=False)
+            else:
+                raise
         out = [[round(s.start + k * PEDACO, 2), round(s.end + k * PEDACO, 2), s.text.strip()]
                for s in segs if s.text.strip()]
         if lingua is None and (inf.language_probability or 0) > 0.8 and out:

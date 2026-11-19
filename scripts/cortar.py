@@ -211,10 +211,16 @@ def palavras_do_trecho(video, idioma, modelo="small"):
     from faster_whisper import WhisperModel
     dispositivo = os.environ.get("CLIPPER_DEVICE", "auto")
     computacao = os.environ.get("CLIPPER_COMPUTE_TYPE", "auto")
-    m = WhisperModel(modelo, device=dispositivo, compute_type=computacao)
-    segs, _ = m.transcribe(audio_16k(video), language=idioma, word_timestamps=True, vad_filter=True,
-                           condition_on_previous_text=False)
-    return [(w.start, w.end, w.word.strip()) for s in segs for w in (s.words or []) if w.word.strip()]
+    try:
+        m = WhisperModel(modelo, device=dispositivo, compute_type=computacao)
+        segs, _ = m.transcribe(audio_16k(video), language=idioma, word_timestamps=True, vad_filter=True,
+                               condition_on_previous_text=False)
+        return [(w.start, w.end, w.word.strip()) for s in segs for w in (s.words or []) if w.word.strip()]
+    except Exception:
+        m = WhisperModel(modelo, device="cpu", compute_type="int8")
+        segs, _ = m.transcribe(audio_16k(video), language=idioma, word_timestamps=True, vad_filter=True,
+                               condition_on_previous_text=False)
+        return [(w.start, w.end, w.word.strip()) for s in segs for w in (s.words or []) if w.word.strip()]
 
 
 def escrever_ass(caminho, titulo, palavras, dur, com_camera):
