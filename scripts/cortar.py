@@ -315,10 +315,18 @@ def fazer(pasta, modelo_legenda="small"):
             (tdir / "de.txt").write_text(f"{s:.2f}-{e:.2f}")
         dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
                                     "csv=p=0", str(trecho)], capture_output=True, text=True).stdout.strip())
-        print("      procurando a câmera do streamer…")
-        W, H, rosto = achar_camera(trecho)
-        print("      câmera do streamer achada: câmera em cima, jogo embaixo" if rosto is not None
-              else "      sem caixinha de câmera: imagem inteira no meio com fundo desfocado", flush=True)
+        estilo = os.environ.get("CLIPPER_ESTILO", "auto").lower()
+        if estilo == "blur":
+            W, H, rosto = int(dur), int(dur), None
+            print("      estilo: fundo desfocado (blur / estilo do vídeo 8) com jogo centralizado", flush=True)
+        elif estilo == "split":
+            print("      procurando a câmera do streamer para split screen…")
+            W, H, rosto = achar_camera(trecho)
+        else:
+            print("      procurando a câmera do streamer…")
+            W, H, rosto = achar_camera(trecho)
+            print("      câmera do streamer achada: câmera em cima, jogo embaixo" if rosto is not None
+                  else "      sem caixinha de câmera: imagem inteira no meio com fundo desfocado", flush=True)
         print("      legenda palavra por palavra…")
         palavras = palavras_do_trecho(trecho, idioma, modelo_legenda)
         escrever_ass(tdir / "legenda.ass", m.get("titulo", ""), palavras, dur, rosto is not None)

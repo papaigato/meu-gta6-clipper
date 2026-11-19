@@ -71,7 +71,19 @@ A IA grava a seleção em `momentos/candidatos.json`:
 ]
 ```
 
-### Passo 3: Montagem e Renderização dos Vídeos
+### Passo 3: Escolha do Estilo Visual (REGRA MANDATÓRIA)
+Antes de renderizar os cortes (`clip fazer`), a IA **DEVE perguntar ao usuário** qual dos dois estilos ele deseja:
+1. **Fundo Desfocado (Cinematic Blur - Estilo do Vídeo 8)**:
+   - Jogo 16:9 inteiro no centro da tela sem cortes.
+   - Fundo 9:16 preenchido com o próprio vídeo borrado.
+   - Legendas centralizadas e limpas (ideal quando o foco é o jogo/gameplay).
+   - *Como ativar no sistema:* `$env:CLIPPER_ESTILO = "blur"`.
+2. **Split-Screen (Webcam no Topo + Gameplay Embaixo)**:
+   - Rosto do streamer detectado por IA e posicionado em cima.
+   - Gameplay preenchendo a metade inferior.
+   - *Como ativar no sistema:* `$env:CLIPPER_ESTILO = "split"`.
+
+### Passo 4: Montagem e Renderização dos Vídeos
 Execute:
 ```powershell
 & "$HOME\clipper-gta6\clip.cmd" escolher <NOME> --manter 3
