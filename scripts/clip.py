@@ -216,11 +216,16 @@ def automatico(a):
     from cortar import escolher as esc
     from ouvir import ler_live
     pasta = ler_live(a.link)
-    if not _rodar_trabalho(pasta, "preparar", [str(pasta), "", "", "12"], a.esperar):
+    forcar = os.environ.get("CLIPPER_FORCAR_REFAZER", "0") == "1"
+    if not _rodar_trabalho(pasta, "preparar", [str(pasta), "", "", str(a.quantos)], a.esperar):
         return
-    if not (pasta / "escolhidos.json").exists() or not (pasta / ".auto").exists():
+    escolhidos = (pasta / "escolhidos.json").exists()
+    quantos_atual = len(ler_json(pasta / "escolhidos.json", {}).get("cortes", [])) if escolhidos else 0
+    if not escolhidos or not (pasta / ".auto").exists() or quantos_atual != a.quantos or forcar:
         esc(pasta, a.quantos, auto=True)
         (pasta / ".auto").write_text("ok")
+        tarefa.limpar(pasta, "fazer")
+    if forcar:
         tarefa.limpar(pasta, "fazer")
     if _rodar_trabalho(pasta, "fazer", [str(pasta), ""], a.esperar):
         from comum import CORTES
