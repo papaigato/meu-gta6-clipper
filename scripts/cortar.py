@@ -341,7 +341,8 @@ def fazer(pasta, modelo_legenda="small"):
         tdir.mkdir(exist_ok=True)
         saida = destino / f"corte_{i:02d}.mp4"
         assinatura = f"{s:.2f}-{e:.2f}-{m.get('titulo', '')}"
-        if saida.exists() and (tdir / "feito.txt").exists() and (tdir / "feito.txt").read_text(encoding="utf-8") == assinatura:
+        forcar = os.environ.get("CLIPPER_FORCAR_REFAZER", "0") == "1"
+        if not forcar and saida.exists() and (tdir / "feito.txt").exists() and (tdir / "feito.txt").read_text(encoding="utf-8") == assinatura:
             print("      já estava pronto", flush=True)
             feitos.append(saida)
             continue
