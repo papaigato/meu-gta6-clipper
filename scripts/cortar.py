@@ -301,7 +301,9 @@ def escrever_ass(caminho, titulo, palavras, dur, com_camera):
 
 
 # ================================================================ baixar só o pedaço
-FORMATO = "bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b"
+def formato_download():
+    max_h = os.environ.get("CLIPPER_MAX_RES", "1440")
+    return f"bv*[height<={max_h}]+ba/b[height<={max_h}]/best"
 
 
 def tem_video(arq):
@@ -314,8 +316,9 @@ def baixar_trecho(pasta, url, s, e, destino):
     """Baixa só os segundos do corte. 1º jeito: o baixador pede só o pedaço. 2º jeito: o ffmpeg pula direto pro
     minuto certo no link do vídeo. Nunca baixa a live inteira (uma live de 10 h teria dezenas de GB)."""
     print("      baixando só esse pedaço do vídeo…", flush=True)
+    fmt = formato_download()
     try:
-        rodar(ytdlp() + ["-f", FORMATO, "--no-playlist", "--no-warnings", "-q", "--download-sections",
+        rodar(ytdlp() + ["-f", fmt, "--no-playlist", "--no-warnings", "-q", "--download-sections",
                          f"*{s:.2f}-{e:.2f}", "--force-keyframes-at-cuts", "--merge-output-format", "mp4",
                          "-o", str(destino), url], timeout=1800)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -324,7 +327,7 @@ def baixar_trecho(pasta, url, s, e, destino):
         return
     destino.unlink(missing_ok=True)
     print("      tentando de outro jeito (pulando direto pro minuto do corte)…", flush=True)
-    r = subprocess.run(ytdlp() + ["-f", FORMATO, "-g", "--no-playlist", "--no-warnings", url],
+    r = subprocess.run(ytdlp() + ["-f", fmt, "-g", "--no-playlist", "--no-warnings", url],
                        capture_output=True, text=True)
     links = [l for l in r.stdout.split() if l.startswith("http")]
     if links:
