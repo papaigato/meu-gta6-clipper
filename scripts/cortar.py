@@ -489,8 +489,11 @@ def fazer(pasta, modelo_legenda="small"):
         tdir_c = pasta / f"corte_{idx:02d}"
         saida_ = destino / f"corte_{idx:02d}.mp4"
         assin_ = f"{s_:.2f}-{e_:.2f}-{item.get('titulo', '')}"
-        if not forcar and saida_.exists() and (tdir_c / "feito.txt").exists():
-            if (tdir_c / "feito.txt").read_text(encoding="utf-8") == assin_:
+        if not forcar and saida_.exists():
+            feito_arq = tdir_c / "feito.txt"
+            if feito_arq.exists() and feito_arq.read_text(encoding="utf-8") == assin_:
+                return False
+            if not feito_arq.exists() and saida_.stat().st_size > 1_000_000:
                 return False
         return True
 
