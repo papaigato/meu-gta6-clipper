@@ -8,9 +8,6 @@ import sys
 import unicodedata
 from pathlib import Path
 
-CASA = Path(os.environ.get("CLIPPER_GTA6_HOME", Path.home() / "clipper-gta6"))
-TRABALHO = CASA / "trabalho"   # áudio, transcrição e trechos de cada live
-
 def obter_pasta_cortes():
     r"""Detecta automaticamente o Google Drive de 4TB (unidade G:\ ou Meu Drive) ou usa CLIPPER_CORTES_DIR."""
     if "CLIPPER_CORTES_DIR" in os.environ:
@@ -28,11 +25,30 @@ def obter_pasta_cortes():
                     return pasta_drive
                 except OSError:
                     pass
-    return CASA / "cortes"
+    if Path("/content/drive/MyDrive").exists():
+        p = Path("/content/drive/MyDrive/GTA6_Cortes")
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    return Path.home() / "clipper-gta6" / "cortes"
 
 CORTES = obter_pasta_cortes()
+
+def obter_casa():
+    if "CLIPPER_GTA6_HOME" in os.environ:
+        return Path(os.environ["CLIPPER_GTA6_HOME"])
+    # Se rodando no Google Colab, persiste o cache de lives no Google Drive para nao perder na troca de VM / GPU
+    if Path("/content/drive/MyDrive").exists():
+        cache_drive = CORTES / ".cache"
+        cache_drive.mkdir(parents=True, exist_ok=True)
+        return cache_drive
+    return Path.home() / "clipper-gta6"
+
+CASA = obter_casa()
+TRABALHO = CASA / "trabalho"   # áudio, transcrição e trechos de cada live
 MODELOS = CASA / "modelos"     # o detector de rosto (baixado no setup)
 YUNET = MODELOS / "face_detection_yunet_2023mar.onnx"
+if not YUNET.exists() and Path("/root/clipper-gta6/modelos/face_detection_yunet_2023mar.onnx").exists():
+    YUNET = Path("/root/clipper-gta6/modelos/face_detection_yunet_2023mar.onnx")
 YUNET_URL = ("https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/"
              "face_detection_yunet_2023mar.onnx")
 BLOCO_MIN = 12  # a IA lê a transcrição 12 minutos por vez
