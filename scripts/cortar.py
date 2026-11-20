@@ -188,16 +188,37 @@ def filtro(W, H, rosto):
         return ("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=30:3[bg];"
                 "[0:v]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p,ass=legenda.ass:fontsdir=fontes[v]")
     fx, fy, fw, fh = rosto
-    cw = min(W, max(fw * 4.2, 380))
-    ch = cw * CAM_H / L
-    if ch > H:
-        ch, cw = H, H * L / CAM_H
-    cx = min(max(fx + fw / 2 - cw / 2, 0), W - cw)
-    cy = min(max(fy + fh * 0.55 - ch / 2, 0), H - ch)
-    gw = min(W, H * L / JOGO_H)
-    gx = (W - gw) / 2
-    return (f"[0:v]crop={_par(cw)}:{_par(ch)}:{_par(cx)}:{_par(cy)},scale={L}:{CAM_H}:flags=lanczos,unsharp=5:5:0.7:5:5:0.0,setsar=1[cam];"
-            f"[0:v]crop={_par(gw)}:{_par(H)}:{_par(gx)}:0,scale={L}:{JOGO_H}:flags=lanczos,setsar=1[jogo];"
+    fcx, fcy = fx + fw / 2, fy + fh / 2
+
+    # Caixa interna da webcam do streamer (corta estritamente dentro da moldura para eliminar bordas pretas/neon e jogo vazando)
+    cw = int(0.246 * W) // 2 * 2
+    ch = int(cw * CAM_H / L) // 2 * 2
+
+    if fcx < W * 0.5 and fcy < H * 0.5:
+        # Canto superior esquerdo (layout padrao Paulinho o Loko)
+        cx = int(0.012 * W) // 2 * 2
+        cy = int(0.022 * H) // 2 * 2
+    elif fcx >= W * 0.5 and fcy < H * 0.5:
+        # Canto superior direito
+        cx = int(W - 0.012 * W - cw) // 2 * 2
+        cy = int(0.022 * H) // 2 * 2
+    elif fcx < W * 0.5 and fcy >= H * 0.5:
+        # Canto inferior esquerdo
+        cx = int(0.012 * W) // 2 * 2
+        cy = int(H - 0.022 * H - ch) // 2 * 2
+    else:
+        # Canto inferior direito
+        cx = int(W - 0.012 * W - cw) // 2 * 2
+        cy = int(H - 0.022 * H - ch) // 2 * 2
+
+    cx = min(max(cx, 0), W - cw)
+    cy = min(max(cy, 0), H - ch)
+
+    gw = int(min(W, H * L / JOGO_H)) // 2 * 2
+    gx = int((W - gw) / 2) // 2 * 2
+
+    return (f"[0:v]crop={cw}:{ch}:{cx}:{cy},scale={L}:{CAM_H}:flags=lanczos,unsharp=5:5:0.7:5:5:0.0,setsar=1[cam];"
+            f"[0:v]crop={gw}:{H}:{gx}:0,scale={L}:{JOGO_H}:flags=lanczos,setsar=1[jogo];"
             f"[cam][jogo]vstack=inputs=2,format=yuv420p,ass=legenda.ass:fontsdir=fontes[v]")
 
 
