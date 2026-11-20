@@ -109,12 +109,10 @@ def ytdlp():
     elif tem("deno") or tem("node"):
         cmd += ["--js-runtimes", "deno" if tem("deno") else "node"]
     
-    # Cookies ou fallback de clientes para evitar bloqueio de bot em nuvem (Colab)
+    # Cookies para evitar bloqueio de bot em nuvem (Colab)
     cookies = buscar_cookies()
     if cookies:
         cmd += ["--cookies", str(cookies)]
-    else:
-        cmd += ["--extractor-args", "youtube:player_client=android,mweb,web"]
     return cmd
 
 

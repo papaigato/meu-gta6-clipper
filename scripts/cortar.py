@@ -307,9 +307,12 @@ def formato_download():
 
 
 def tem_video(arq):
-    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-count_packets", "-show_entries",
-                        "stream=nb_read_packets", "-of", "csv=p=0", str(arq)], capture_output=True, text=True)
-    return r.stdout.strip().isdigit() and int(r.stdout.strip()) > 10
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-count_packets", "-show_entries",
+                            "stream=nb_read_packets", "-of", "csv=p=0", str(arq)], capture_output=True, text=True)
+        return r.stdout.strip().isdigit() and int(r.stdout.strip()) > 10
+    except Exception:
+        return Path(arq).exists() and Path(arq).stat().st_size > 100_000
 
 
 def baixar_trecho(pasta, url, s, e, destino):
