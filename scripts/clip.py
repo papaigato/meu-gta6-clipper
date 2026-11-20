@@ -214,11 +214,18 @@ def automatico(a):
     """Tudo sozinho, sem a IA ler nada: escuta, pega os trechos mais quentes e monta. Pra IA fraca ou com pressa."""
     import tarefa
     from cortar import escolher as esc
-    from ouvir import ler_live
+    from ouvir import candidatos, ler_live, picos_do_chat
     pasta = ler_live(a.link)
     forcar = os.environ.get("CLIPPER_FORCAR_REFAZER", "0") == "1"
     if not _rodar_trabalho(pasta, "preparar", [str(pasta), "", "", str(a.quantos)], a.esperar):
         return
+    cand_atual = ler_json(pasta / "candidatos.json", [])
+    if len(cand_atual) < a.quantos and (pasta / "transcricao.json").exists() and (pasta / "volume.json").exists():
+        print(f"\n[Auto] Expandindo candidatos de {len(cand_atual)} para {a.quantos} usando transcrição já salva…", flush=True)
+        trans = ler_json(pasta / "transcricao.json", {"segmentos": []})
+        volume = ler_json(pasta / "volume.json", [])
+        chat = picos_do_chat(pasta)
+        candidatos(pasta, trans, volume, chat, quantos=max(a.quantos, 12))
     escolhidos = (pasta / "escolhidos.json").exists()
     quantos_atual = len(ler_json(pasta / "escolhidos.json", {}).get("cortes", [])) if escolhidos else 0
     if not escolhidos or not (pasta / ".auto").exists() or quantos_atual != a.quantos or forcar:

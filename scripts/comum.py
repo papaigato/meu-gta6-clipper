@@ -54,6 +54,60 @@ YUNET_URL = ("https://github.com/opencv/opencv_zoo/raw/main/models/face_detectio
 BLOCO_MIN = 12  # a IA lê a transcrição 12 minutos por vez
 
 
+def pasta_temp_live(pasta):
+    """Retorna pasta rápida em SSD local (/tmp no Colab) para arquivos pesados temporários (WAV, trechos, render).
+    No PC local retorna a própria pasta da live."""
+    tmp_env = os.environ.get("CLIPPER_TMP_DIR")
+    if tmp_env:
+        p = Path(tmp_env) / Path(pasta).name
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    if Path("/content/drive/MyDrive").exists():
+        p = Path("/tmp/clipper_gta6") / Path(pasta).name
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    return Path(pasta)
+
+
+def cuda_ld_library_path():
+    """Encontra diretórios lib da NVIDIA (cublas/cudnn) instalados via pip no Linux/Colab."""
+    if os.name == "nt":
+        return ""
+    caminhos = []
+    for base in sys.path:
+        nv = Path(base) / "nvidia"
+        if nv.is_dir():
+            for lib in nv.glob("*/lib"):
+                if lib.is_dir():
+                    caminhos.append(str(lib))
+    return ":".join(dict.fromkeys(caminhos))
+
+
+_NVENC_OK = None
+
+
+def tem_nvenc():
+    """Testa uma única vez se o encoder de hardware NVIDIA (h264_nvenc) está disponível e funcional."""
+    global _NVENC_OK
+    modo = os.environ.get("CLIPPER_ENCODER", "auto").lower()
+    if modo == "cpu":
+        return False
+    if modo == "nvenc":
+        return True
+    if _NVENC_OK is not None:
+        return _NVENC_OK
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
+             "-c:v", "h264_nvenc", "-f", "null", "-"],
+            capture_output=True, timeout=15
+        )
+        _NVENC_OK = (r.returncode == 0)
+    except Exception:
+        _NVENC_OK = False
+    return _NVENC_OK
+
+
 def slug(texto, limite=60):
     t = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
     t = re.sub(r"[^A-Za-z0-9]+", "-", t).strip("-").lower()

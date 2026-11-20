@@ -57,6 +57,14 @@ def acompanhar(pasta, nome, argv, espera=ESPERA):
         if os.name == "nt":  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
             kw = {"creationflags": 0x00000008 | 0x00000200 | 0x08000000}
         env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8", OPENCV_LOG_LEVEL="ERROR")
+        try:
+            from comum import cuda_ld_library_path
+            nv_libs = cuda_ld_library_path()
+            if nv_libs:
+                atual_ld = env.get("LD_LIBRARY_PATH", "")
+                env["LD_LIBRARY_PATH"] = f"{nv_libs}:{atual_ld}" if atual_ld else nv_libs
+        except Exception:
+            pass
         proc = subprocess.Popen([sys.executable, str(CLIP), "_trabalho", nome, *argv], stdout=log,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, **kw)
         pid = proc.pid

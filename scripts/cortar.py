@@ -8,9 +8,10 @@ import os
 import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from comum import (CORTES, YUNET, YUNET_URL, gravar_json, hms, ler_json, rodar, segundos, ytdlp)  # noqa: F401
+from comum import (CORTES, YUNET, YUNET_URL, gravar_json, hms, ler_json, pasta_temp_live, rodar, segundos, tem_nvenc, ytdlp)  # noqa: F401
 
 FONTES = Path(__file__).resolve().parent.parent / "fontes"
 L, A = 1080, 1920          # vídeo vertical
@@ -133,12 +134,51 @@ def escolher(pasta, manter=3, minimo=20, maximo=60, auto=False):
 
 
 # ================================================================ câmera do streamer
+def dimensoes_video(video):
+    """Lê largura e altura reais do vídeo rapidamente via ffprobe."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=width,height", "-of", "csv=s=x:p=0", str(video)],
+            capture_output=True, text=True, timeout=15
+        )
+        partes = r.stdout.strip().splitlines()[0].split("x")
+        w, h = int(partes[0]), int(partes[1])
+        if w > 0 and h > 0:
+            return w, h
+    except Exception:
+        pass
+    return 1920, 1080
+
+
+def duracao_video(video, padrao=45.0):
+    """Lê duração do vídeo com fallback seguro (nunca quebra em float(''))."""
+    for cmd in (
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration", "-of", "csv=p=0", str(video)],
+    ):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            txt = r.stdout.strip().splitlines()[0] if r.stdout.strip() else ""
+            if txt and txt.upper() != "N/A":
+                val = float(txt)
+                if val > 0.5:
+                    return val
+        except Exception:
+            pass
+    return float(padrao)
+
+
 def achar_camera(video):
     """Procura o rosto em 14 quadros do trecho e devolve a caixa (x, y, l, a) do rosto mais frequente."""
     import cv2
     import numpy as np
     cap = cv2.VideoCapture(str(video))
     W, H = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if W <= 0 or H <= 0:
+        cap.release()
+        W, H = dimensoes_video(video)
+        return W, H, None
     if not YUNET.exists():
         YUNET.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -151,16 +191,17 @@ def achar_camera(video):
         return W, H, None
     n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
     esc = 960 / W
-    det = cv2.FaceDetectorYN.create(str(YUNET), "", (960, int(H * esc)), 0.75)
+    h_esc = max(1, int(H * esc))
+    det = cv2.FaceDetectorYN.create(str(YUNET), "", (960, h_esc), 0.65)
     caixas = []
     for k in range(14):
         cap.set(cv2.CAP_PROP_POS_FRAMES, int(n * (k + 0.5) / 14))
         ok, q = cap.read()
         if not ok:
             continue
-        _, rostos = det.detect(cv2.resize(q, (960, int(H * esc))))
+        _, rostos = det.detect(cv2.resize(q, (960, h_esc)))
         for r in rostos if rostos is not None else []:
-            if r[14] >= 0.75 and r[3] / esc > H * 0.05:
+            if r[14] >= 0.65 and r[3] / esc > H * 0.04:
                 caixas.append([v / esc for v in r[:4]])
     cap.release()
     if len(caixas) < 3:
@@ -172,8 +213,34 @@ def achar_camera(video):
     if len(perto) < 3:
         return W, H, None
     rosto = np.median(perto, axis=0)
-    if rosto[3] > H * 0.12:  # rosto grande = não é a caixinha da câmera (podcast, live só de câmera): imagem inteira
+    if rosto[3] > H * 0.30:  # rosto muito grande (>30% da tela) = podcast / live só de câmera
         return W, H, None
+    return W, H, [float(v) for v in rosto]
+
+
+def obter_camera_live(pasta, trecho, estilo):
+    """Detecta a câmera uma única vez por live (salva em camera.json) e aplica fallback calibrado no modo split."""
+    W, H = dimensoes_video(trecho)
+    if estilo == "blur":
+        print("      estilo: fundo desfocado (blur) com jogo centralizado", flush=True)
+        return W, H, None
+    cache_cam = pasta / "camera.json"
+    cam = ler_json(cache_cam)
+    if cam and cam.get("W") == W and cam.get("H") == H and cam.get("rosto") is not None:
+        return W, H, cam["rosto"]
+    print("      procurando a câmera do streamer (1x por live)…", flush=True)
+    W_det, H_det, rosto = achar_camera(trecho)
+    W, H = (W_det or W), (H_det or H)
+    if rosto is None and estilo == "split":
+        # Fallback calibrado (canto superior esquerdo - padrão Paulinho o LOKO) em vez de cair para blur
+        rosto = [0.05 * W, 0.05 * H, 0.08 * W, 0.08 * H]
+        print("      usando posição calibrada padrão da webcam (canto superior esquerdo)", flush=True)
+    elif rosto is not None:
+        print("      câmera do streamer achada e salva em cache: câmera em cima, jogo embaixo", flush=True)
+    else:
+        print("      sem caixinha de câmera: imagem inteira no meio com fundo desfocado", flush=True)
+    if rosto is not None:
+        gravar_json(cache_cam, {"W": W, "H": H, "rosto": rosto})
     return W, H, rosto
 
 
@@ -240,19 +307,41 @@ def audio_16k(arquivo):
     return np.frombuffer(r.stdout, dtype=np.int16).astype(np.float32) / 32768
 
 
-def palavras_do_trecho(video, idioma, modelo="small"):
+_WHISPER_CACHE = {}
+
+
+def _obter_whisper(modelo):
+    """Carrega o WhisperModel uma única vez e reutiliza em todos os cortes."""
     from faster_whisper import WhisperModel
     dispositivo = os.environ.get("CLIPPER_DEVICE", "auto")
     computacao = os.environ.get("CLIPPER_COMPUTE_TYPE", "auto")
+    chave = (modelo, dispositivo, computacao)
+    if chave not in _WHISPER_CACHE:
+        try:
+            _WHISPER_CACHE[chave] = WhisperModel(modelo, device=dispositivo, compute_type=computacao)
+        except Exception:
+            _WHISPER_CACHE[chave] = WhisperModel(modelo, device="cpu", compute_type="int8")
+    return _WHISPER_CACHE[chave]
+
+
+def palavras_do_trecho(video, idioma, modelo="small"):
+    from faster_whisper import WhisperModel
+    audio = audio_16k(video)
+    m = _obter_whisper(modelo)
     try:
-        m = WhisperModel(modelo, device=dispositivo, compute_type=computacao)
-        segs, _ = m.transcribe(audio_16k(video), language=idioma, word_timestamps=True, vad_filter=True,
-                               condition_on_previous_text=False)
+        segs, _ = m.transcribe(audio, language=idioma, word_timestamps=True, vad_filter=True,
+                               beam_size=1, condition_on_previous_text=False)
         return [(w.start, w.end, w.word.strip()) for s in segs for w in (s.words or []) if w.word.strip()]
     except Exception:
-        m = WhisperModel(modelo, device="cpu", compute_type="int8")
-        segs, _ = m.transcribe(audio_16k(video), language=idioma, word_timestamps=True, vad_filter=True,
-                               condition_on_previous_text=False)
+        chave_cpu = (modelo, "cpu", "int8")
+        if chave_cpu not in _WHISPER_CACHE:
+            _WHISPER_CACHE[chave_cpu] = WhisperModel(modelo, device="cpu", compute_type="int8")
+        # Atualiza cache padrão para não falhar de novo no próximo corte
+        dispositivo = os.environ.get("CLIPPER_DEVICE", "auto")
+        computacao = os.environ.get("CLIPPER_COMPUTE_TYPE", "auto")
+        _WHISPER_CACHE[(modelo, dispositivo, computacao)] = _WHISPER_CACHE[chave_cpu]
+        segs, _ = _WHISPER_CACHE[chave_cpu].transcribe(audio, language=idioma, word_timestamps=True, vad_filter=True,
+                                                       beam_size=1, condition_on_previous_text=False)
         return [(w.start, w.end, w.word.strip()) for s in segs for w in (s.words or []) if w.word.strip()]
 
 
@@ -294,6 +383,7 @@ def escrever_ass(caminho, titulo, palavras, dur, com_camera):
         prox = grupos[g + 1][0][0] if g + 1 < len(grupos) else dur
         for k, (s, e, _) in enumerate(grupo):
             fim = grupo[k + 1][0] if k + 1 < len(grupo) else (prox if prox - e < 0.6 else e + 0.25)
+            fim = max(s + 0.12, fim)
             txt = " ".join(("{\\c&H0020FFFF&}" if j == k else "{\\c&HFFFFFF&}") + _limpo(w).upper()
                            for j, (_, _, w) in enumerate(grupo))
             linhas.append(f"Dialogue: 0,{_ass_tempo(s)},{_ass_tempo(fim)},Leg,,0,0,0,,{{\\pos(540,{y_leg})}}{txt}")
@@ -307,53 +397,75 @@ def formato_download():
 
 
 def tem_video(arq):
+    """Checagem ultra-rápida (~0.05s) de integridade do vídeo via cabeçalho ffprobe."""
+    p = Path(arq)
+    if not p.exists() or p.stat().st_size < 50_000:
+        return False
     try:
-        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-count_packets", "-show_entries",
-                            "stream=nb_read_packets", "-of", "csv=p=0", str(arq)], capture_output=True, text=True)
-        return r.stdout.strip().isdigit() and int(r.stdout.strip()) > 10
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=codec_type", "-of", "csv=p=0", str(p)],
+            capture_output=True, text=True, timeout=15
+        )
+        return "video" in r.stdout.lower()
     except Exception:
-        return Path(arq).exists() and Path(arq).stat().st_size > 100_000
+        return p.stat().st_size > 100_000
 
 
-def baixar_trecho(pasta, url, s, e, destino):
-    """Baixa só os segundos do corte. 1º jeito: o baixador pede só o pedaço. 2º jeito: o ffmpeg pula direto pro
-    minuto certo no link do vídeo. Nunca baixa a live inteira (uma live de 10 h teria dezenas de GB)."""
-    print("      baixando pedaço em 1440p60 (Ultra-HD)…", flush=True)
+_UA_CHROME = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+
+def baixar_trecho(pasta, url, s, e, destino, silencioso=False):
+    """Baixa só os segundos do corte em cópia direta de stream (sem re-encode na CPU!).
+    1º jeito: yt-dlp --download-sections com mux MKV (aceita VP9+Opus/AV1/H264 em segundos).
+    2º jeito: ffmpeg com User-Agent Chrome pulando direto pro minuto certo."""
+    max_h = os.environ.get("CLIPPER_MAX_RES", "1440")
+    if not silencioso:
+        print(f"      baixando pedaço em {max_h}p60 (stream copy turbo)…", flush=True)
     fmt = formato_download()
+    destino.parent.mkdir(parents=True, exist_ok=True)
     try:
         rodar(ytdlp() + ["-f", fmt, "--no-playlist", "--no-warnings", "-q", "--download-sections",
-                         f"*{s:.2f}-{e:.2f}", "--force-keyframes-at-cuts", "--merge-output-format", "mp4",
-                         "-o", str(destino), url], timeout=1800)
+                         f"*{s:.2f}-{e:.2f}", "--merge-output-format", "mkv",
+                         "-o", str(destino), url], timeout=900)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
     if destino.exists() and tem_video(destino):
-        return
-    for ext in ("webm", "mkv", "part"):
-        cand = destino.parent / f"{destino.name}.{ext}"
-        if cand.exists() and tem_video(cand):
-            cand.replace(destino)
-            return
+        return destino
+    for ext in ("mkv", "webm", "mp4", "part"):
+        for cand in (destino.with_suffix(f".{ext}"), destino.parent / f"{destino.name}.{ext}"):
+            if cand != destino and cand.exists() and tem_video(cand):
+                cand.replace(destino)
+                return destino
     destino.unlink(missing_ok=True)
-    print("      tentando de outro jeito (pulando direto pro minuto do corte)…", flush=True)
+    if not silencioso:
+        print("      tentando de outro jeito (pulando direto pro minuto do corte)…", flush=True)
     r = subprocess.run(ytdlp() + ["-f", fmt, "-g", "--no-playlist", "--no-warnings", url],
                        capture_output=True, text=True)
     links = [l for l in r.stdout.split() if l.startswith("http")]
     if links:
         entrada = []
         for l in links[:2]:
-            entrada += ["-ss", f"{s:.2f}", "-i", l]
+            entrada += ["-user_agent", _UA_CHROME, "-ss", f"{s:.2f}", "-i", l]
         mapa = ["-map", "0:v:0", "-map", f"{len(links[:2]) - 1}:a:0?"]
         try:
             rodar(["ffmpeg", "-y", "-loglevel", "error", *entrada, "-t", f"{e - s:.2f}", *mapa,
-                   "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-c:a", "aac", "-b:a", "192k", destino],
-                  timeout=1800)
+                   "-c", "copy", str(destino)], timeout=900)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             pass
     if destino.exists() and tem_video(destino):
-        return
+        return destino
     destino.unlink(missing_ok=True)
     raise SystemExit("NÃO CONSEGUI BAIXAR esse pedaço do vídeo. Rode 'instalar' (atualiza o baixador) e depois "
                      "'fazer' de novo: os cortes que já ficaram prontos não são refeitos.")
+
+
+def _args_encoder():
+    """Usa GPU NVIDIA NVENC (5x-10x mais rápido) se disponível; caso contrário libx264 CPU."""
+    if tem_nvenc():
+        return ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "16", "-b:v", "0", "-pix_fmt", "yuv420p"]
+    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p"]
 
 
 # ================================================================ fazer
@@ -365,60 +477,111 @@ def fazer(pasta, modelo_legenda="small"):
     idioma = ler_json(pasta / "transcricao.json", {}).get("idioma")
     destino = CORTES / pasta.name
     destino.mkdir(parents=True, exist_ok=True)
-    feitos = []
-    for i, m in enumerate(escolhidos, 1):
-        s, e = m["_s"], m["_e"]
-        print(f"\n[4/4] Corte {i}/{len(escolhidos)}: {m.get('titulo', '')}  ({hms(s)}–{hms(e)})", flush=True)
-        tdir = pasta / f"corte_{i:02d}"
-        tdir.mkdir(exist_ok=True)
-        saida = destino / f"corte_{i:02d}.mp4"
-        assinatura = f"{s:.2f}-{e:.2f}-{m.get('titulo', '')}"
-        forcar = os.environ.get("CLIPPER_FORCAR_REFAZER", "0") == "1"
-        if not forcar and saida.exists() and (tdir / "feito.txt").exists() and (tdir / "feito.txt").read_text(encoding="utf-8") == assinatura:
-            print("      já estava pronto", flush=True)
-            feitos.append(saida)
-            continue
-        trecho = tdir / "trecho.mp4"
+    temp_base = pasta_temp_live(pasta)
+    usa_nvenc = tem_nvenc()
+    enc_args = _args_encoder()
+    forcar = os.environ.get("CLIPPER_FORCAR_REFAZER", "0") == "1"
+    estilo = os.environ.get("CLIPPER_ESTILO", "auto").lower()
+    print(f"      [Turbo] Encoder: {'GPU NVIDIA NVENC (h264_nvenc)' if usa_nvenc else 'CPU (libx264)'} | Temp: {temp_base}", flush=True)
+
+    def _precisa_fazer(idx, item):
+        s_, e_ = item["_s"], item["_e"]
+        tdir_c = pasta / f"corte_{idx:02d}"
+        saida_ = destino / f"corte_{idx:02d}.mp4"
+        assin_ = f"{s_:.2f}-{e_:.2f}-{item.get('titulo', '')}"
+        if not forcar and saida_.exists() and (tdir_c / "feito.txt").exists():
+            if (tdir_c / "feito.txt").read_text(encoding="utf-8") == assin_:
+                return False
+        return True
+
+    def _preparar_trecho(idx, item, silencioso=False):
+        s_, e_ = item["_s"], item["_e"]
+        tdir_t = temp_base / f"corte_{idx:02d}"
+        tdir_t.mkdir(parents=True, exist_ok=True)
+        trecho_ = tdir_t / "trecho.mkv"
+        de_txt = tdir_t / "de.txt"
         if forcar:
-            trecho.unlink(missing_ok=True)
-            (tdir / "de.txt").unlink(missing_ok=True)
-        if (tdir / "de.txt").exists() and (tdir / "de.txt").read_text() != f"{s:.2f}-{e:.2f}":
-            trecho.unlink(missing_ok=True)  # o momento mudou: baixa o pedaço novo
-        if trecho.exists() and not tem_video(trecho):
-            trecho.unlink()
-        if not trecho.exists():
-            baixar_trecho(pasta, info["url"], s, e, trecho)
-            (tdir / "de.txt").write_text(f"{s:.2f}-{e:.2f}")
-        dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
-                                    "csv=p=0", str(trecho)], capture_output=True, text=True).stdout.strip())
-        estilo = os.environ.get("CLIPPER_ESTILO", "auto").lower()
-        if estilo == "blur":
-            W, H, rosto = int(dur), int(dur), None
-            print("      estilo: fundo desfocado (blur / estilo do vídeo 8) com jogo centralizado", flush=True)
-        elif estilo == "split":
-            print("      procurando a câmera do streamer para split screen…")
-            W, H, rosto = achar_camera(trecho)
-        else:
-            print("      procurando a câmera do streamer…")
-            W, H, rosto = achar_camera(trecho)
-            print("      câmera do streamer achada: câmera em cima, jogo embaixo" if rosto is not None
-                  else "      sem caixinha de câmera: imagem inteira no meio com fundo desfocado", flush=True)
-        print("      legenda palavra por palavra…")
-        palavras = palavras_do_trecho(trecho, idioma, modelo_legenda)
-        escrever_ass(tdir / "legenda.ass", m.get("titulo", ""), palavras, dur, rosto is not None)
-        (tdir / "fontes").mkdir(exist_ok=True)
-        for fonte in FONTES.glob("*.ttf"):
-            shutil.copy(fonte, tdir / "fontes" / fonte.name)
-        rodar(["ffmpeg", "-y", "-loglevel", "error", "-i", "trecho.mp4", "-filter_complex",
-               filtro(W, H, rosto), "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
-               "-crf", "16", "-r", "60", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
-               str(saida.resolve())], cwd=tdir)
-        post = (f"{m.get('titulo', '')}\n\n{m.get('post', '').strip()}\n\n"
-                f"Corte da live de {info.get('uploader') or info.get('channel')}: {info.get('webpage_url') or info['url']}\n")
-        saida.with_suffix(".txt").write_text(post, encoding="utf-8")
-        (tdir / "feito.txt").write_text(assinatura, encoding="utf-8")
-        feitos.append(saida)
-        print(f"      PRONTO: {saida}", flush=True)
+            trecho_.unlink(missing_ok=True)
+            de_txt.unlink(missing_ok=True)
+        if de_txt.exists() and de_txt.read_text() != f"{s_:.2f}-{e_:.2f}":
+            trecho_.unlink(missing_ok=True)
+        if trecho_.exists() and not tem_video(trecho_):
+            trecho_.unlink(missing_ok=True)
+        if not trecho_.exists():
+            baixar_trecho(pasta, info["url"], s_, e_, trecho_, silencioso=silencioso)
+            de_txt.write_text(f"{s_:.2f}-{e_:.2f}")
+        return trecho_
+
+    feitos = []
+    # Pré-carrega o próximo download em paralelo enquanto o corte atual legenda e renderiza
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        fut_prox = None
+        prox_idx = None
+
+        def _agendar_proximo(atual_idx):
+            nonlocal fut_prox, prox_idx
+            fut_prox, prox_idx = None, None
+            for j in range(atual_idx + 1, len(escolhidos) + 1):
+                if _precisa_fazer(j, escolhidos[j - 1]):
+                    prox_idx = j
+                    fut_prox = pool.submit(_preparar_trecho, j, escolhidos[j - 1], True)
+                    break
+
+        for i, m in enumerate(escolhidos, 1):
+            s, e = m["_s"], m["_e"]
+            print(f"\n[4/4] Corte {i}/{len(escolhidos)}: {m.get('titulo', '')}  ({hms(s)}–{hms(e)})", flush=True)
+            tdir_cache = pasta / f"corte_{i:02d}"
+            tdir_cache.mkdir(exist_ok=True)
+            tdir_tmp = temp_base / f"corte_{i:02d}"
+            tdir_tmp.mkdir(parents=True, exist_ok=True)
+            saida = destino / f"corte_{i:02d}.mp4"
+            assinatura = f"{s:.2f}-{e:.2f}-{m.get('titulo', '')}"
+            if not _precisa_fazer(i, m):
+                print("      já estava pronto", flush=True)
+                feitos.append(saida)
+                continue
+
+            if fut_prox is not None and prox_idx == i:
+                print("      usando pré-download paralelo…", flush=True)
+                trecho = fut_prox.result()
+                fut_prox, prox_idx = None, None
+            else:
+                trecho = _preparar_trecho(i, m, silencioso=False)
+
+            # Dispara o download do próximo corte em segundo plano imediatamente
+            _agendar_proximo(i)
+
+            dur = duracao_video(trecho, padrao=max(10.0, e - s))
+            W, H, rosto = obter_camera_live(pasta, trecho, estilo)
+            print("      legenda palavra por palavra…", flush=True)
+            palavras = palavras_do_trecho(trecho, idioma, modelo_legenda)
+            escrever_ass(tdir_tmp / "legenda.ass", m.get("titulo", ""), palavras, dur, rosto is not None)
+            (tdir_tmp / "fontes").mkdir(exist_ok=True)
+            for fonte in FONTES.glob("*.ttf"):
+                dest_f = tdir_tmp / "fontes" / fonte.name
+                if not dest_f.exists():
+                    shutil.copy(fonte, dest_f)
+
+            saida_render = (tdir_tmp / f"render_{i:02d}.mp4") if temp_base != pasta else saida
+            print(f"      renderizando 1080x1920@60fps ({'GPU NVENC' if usa_nvenc else 'CPU'})…", flush=True)
+            rodar(["ffmpeg", "-y", "-loglevel", "error", "-i", trecho.name, "-filter_complex",
+                   filtro(W, H, rosto), "-map", "[v]", "-map", "0:a?", *enc_args,
+                   "-r", "60", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+                   str(saida_render.resolve())], cwd=tdir_tmp)
+
+            if saida_render != saida:
+                shutil.copy2(saida_render, saida)
+            post = (f"{m.get('titulo', '')}\n\n{m.get('post', '').strip()}\n\n"
+                    f"Corte da live de {info.get('uploader') or info.get('channel')}: {info.get('webpage_url') or info['url']}\n")
+            saida.with_suffix(".txt").write_text(post, encoding="utf-8")
+            (tdir_cache / "feito.txt").write_text(assinatura, encoding="utf-8")
+            feitos.append(saida)
+            print(f"      PRONTO: {saida}", flush=True)
+
+            # Limpa temporários do corte no SSD local (/tmp) para economizar espaço
+            if tdir_tmp != tdir_cache:
+                shutil.rmtree(tdir_tmp, ignore_errors=True)
+
     for velho in destino.glob("corte_*.*"):  # escolheu menos cortes que da última vez: tira os que sobraram
         if velho.stem not in {f.stem for f in feitos}:
             velho.unlink(missing_ok=True)

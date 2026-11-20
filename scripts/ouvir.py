@@ -18,7 +18,7 @@ import time
 import wave
 from pathlib import Path
 
-from comum import (BLOCO_MIN, TRABALHO, gravar_json, hms, ler_json, motivo_trancada, rodar, slug, ytdlp)
+from comum import (BLOCO_MIN, TRABALHO, gravar_json, hms, ler_json, motivo_trancada, pasta_temp_live, rodar, slug, ytdlp)
 
 PEDACO = 600  # escuta 10 minutos por vez e guarda: se parar no meio, continua dali
 LINKS = TRABALHO / "links.json"
@@ -93,11 +93,20 @@ def baixar_audio(pasta):
 
 
 def wav16k(pasta):
-    w = pasta / "audio16k.wav"
+    w_antigo = pasta / "audio16k.wav"
+    if w_antigo.exists():
+        return w_antigo
+    tdir = pasta_temp_live(pasta)
+    w = tdir / "audio16k.wav"
     if not w.exists():
         audio = audio_pronto(pasta)
-        tmp = pasta / "audio16k.tmp.wav"
-        print("      preparando o áudio pra escutar…", flush=True)
+        if audio is None:
+            baixar_audio(pasta)
+            audio = audio_pronto(pasta)
+        if audio is None:
+            raise SystemExit("NÃO ENCONTREI o arquivo de áudio baixado para converter em WAV.")
+        tmp = tdir / "audio16k.tmp.wav"
+        print("      preparando o áudio pra escutar (SSD local)…", flush=True)
         rodar(["ffmpeg", "-y", "-loglevel", "error", "-i", audio, "-ac", "1", "-ar", "16000", tmp])
         tmp.replace(w)
     return w
@@ -140,15 +149,17 @@ def transcrever(pasta, modelo=None, idioma=None):
             a = np.frombuffer(f.readframes(PEDACO * sr), dtype=np.int16).astype(np.float32) / 32768
         try:
             segs, inf = m.transcribe(a, language=lingua, vad_filter=True, beam_size=1, condition_on_previous_text=False)
+            out = [[round(s.start + k * PEDACO, 2), round(s.end + k * PEDACO, 2), s.text.strip()]
+                   for s in segs if s.text.strip()]
         except RuntimeError as e:
             if "libcublas" in str(e).lower() or "cuda" in str(e).lower():
-                print("      [Ajustando biblioteca CUDA para transcrição...]", flush=True)
+                print("      [Ajustando biblioteca CUDA para transcrição (CPU int8)...]", flush=True)
                 m = WhisperModel(modelo, device="cpu", compute_type="int8")
                 segs, inf = m.transcribe(a, language=lingua, vad_filter=True, beam_size=1, condition_on_previous_text=False)
+                out = [[round(s.start + k * PEDACO, 2), round(s.end + k * PEDACO, 2), s.text.strip()]
+                       for s in segs if s.text.strip()]
             else:
                 raise
-        out = [[round(s.start + k * PEDACO, 2), round(s.end + k * PEDACO, 2), s.text.strip()]
-               for s in segs if s.text.strip()]
         if lingua is None and (inf.language_probability or 0) > 0.8 and out:
             lingua = inf.language  # fixa a língua quando tem certeza (fica mais rápido e mais certo)
         gravar_json(arq, {"idioma": inf.language, "segmentos": out})
@@ -281,11 +292,15 @@ def candidatos(pasta, trans, volume, chat, quantos=12, janela=150):
     calor[max(0, fim - 240):] *= 0.3  # fim: despedida
     soma = np.convolve(calor, np.ones(janela), "valid")[:max(1, fim - janela // 2)]
     escolhidos = []
-    for i in np.argsort(-soma):
+    ordem = np.argsort(-soma)
+    for espaco in (janela, max(60, janela // 2)):
+        for i in ordem:
+            if len(escolhidos) >= quantos:
+                break
+            if all(abs(int(i) - j) >= espaco for j in escolhidos):
+                escolhidos.append(int(i))
         if len(escolhidos) >= quantos:
             break
-        if all(abs(int(i) - j) >= janela for j in escolhidos):
-            escolhidos.append(int(i))
     escolhidos.sort()
     topo = max(float(soma[i]) for i in escolhidos) or 1
     vol = dict((s, e) for s, e in volume)
