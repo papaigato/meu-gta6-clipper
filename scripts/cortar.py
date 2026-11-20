@@ -315,7 +315,7 @@ def tem_video(arq):
 def baixar_trecho(pasta, url, s, e, destino):
     """Baixa só os segundos do corte. 1º jeito: o baixador pede só o pedaço. 2º jeito: o ffmpeg pula direto pro
     minuto certo no link do vídeo. Nunca baixa a live inteira (uma live de 10 h teria dezenas de GB)."""
-    print("      baixando só esse pedaço do vídeo…", flush=True)
+    print("      baixando pedaço em 1440p60 (Ultra-HD)…", flush=True)
     fmt = formato_download()
     try:
         rodar(ytdlp() + ["-f", fmt, "--no-playlist", "--no-warnings", "-q", "--download-sections",
@@ -325,6 +325,11 @@ def baixar_trecho(pasta, url, s, e, destino):
         pass
     if destino.exists() and tem_video(destino):
         return
+    for ext in ("webm", "mkv", "part"):
+        cand = destino.parent / f"{destino.name}.{ext}"
+        if cand.exists() and tem_video(cand):
+            cand.replace(destino)
+            return
     destino.unlink(missing_ok=True)
     print("      tentando de outro jeito (pulando direto pro minuto do corte)…", flush=True)
     r = subprocess.run(ytdlp() + ["-f", fmt, "-g", "--no-playlist", "--no-warnings", url],
@@ -371,6 +376,9 @@ def fazer(pasta, modelo_legenda="small"):
             feitos.append(saida)
             continue
         trecho = tdir / "trecho.mp4"
+        if forcar:
+            trecho.unlink(missing_ok=True)
+            (tdir / "de.txt").unlink(missing_ok=True)
         if (tdir / "de.txt").exists() and (tdir / "de.txt").read_text() != f"{s:.2f}-{e:.2f}":
             trecho.unlink(missing_ok=True)  # o momento mudou: baixa o pedaço novo
         if trecho.exists() and not tem_video(trecho):
@@ -399,8 +407,8 @@ def fazer(pasta, modelo_legenda="small"):
         for fonte in FONTES.glob("*.ttf"):
             shutil.copy(fonte, tdir / "fontes" / fonte.name)
         rodar(["ffmpeg", "-y", "-loglevel", "error", "-i", "trecho.mp4", "-filter_complex",
-               filtro(W, H, rosto), "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium",
-               "-crf", "19", "-r", "30", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
+               filtro(W, H, rosto), "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
+               "-crf", "16", "-r", "60", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
                str(saida.resolve())], cwd=tdir)
         post = (f"{m.get('titulo', '')}\n\n{m.get('post', '').strip()}\n\n"
                 f"Corte da live de {info.get('uploader') or info.get('channel')}: {info.get('webpage_url') or info['url']}\n")
