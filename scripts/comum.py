@@ -175,9 +175,9 @@ def ytdlp():
     # o YouTube está passando a exigir um JavaScript pra liberar os formatos: o instalar põe o Deno no ambiente
     deno = Path(sys.executable).parent / ("deno.exe" if os.name == "nt" else "deno")
     if deno.exists():
-        cmd += ["--js-runtimes", f"deno:{deno}"]
+        cmd += ["--js-runtimes", f"deno:{deno}", "--remote-components", "ejs:github"]
     elif tem("deno") or tem("node"):
-        cmd += ["--js-runtimes", "deno" if tem("deno") else "node"]
+        cmd += ["--js-runtimes", "deno" if tem("deno") else "node", "--remote-components", "ejs:github"]
     
     # Cookies para evitar bloqueio de bot em nuvem (Colab)
     cookies = buscar_cookies()
