@@ -320,43 +320,74 @@ def tem_video(arq):
 
 
 def baixar_trecho(pasta, url, s, e, destino):
-    """Baixa só os segundos do corte. 1º jeito: o baixador pede só o pedaço. 2º jeito: o ffmpeg pula direto pro
-    minuto certo no link do vídeo. Nunca baixa a live inteira (uma live de 10 h teria dezenas de GB)."""
-    print("      baixando pedaço em 1440p60 (Ultra-HD)…", flush=True)
-    fmt = formato_download()
-    try:
-        rodar(ytdlp() + ["-f", fmt, "--no-playlist", "--no-warnings", "-q", "--download-sections",
-                         f"*{s:.2f}-{e:.2f}", "--force-keyframes-at-cuts", "--merge-output-format", "mp4",
-                         "-o", str(destino), url], timeout=1800)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        pass
-    if destino.exists() and tem_video(destino):
-        return
-    for ext in ("webm", "mkv", "part"):
-        cand = destino.parent / f"{destino.name}.{ext}"
-        if cand.exists() and tem_video(cand):
-            cand.replace(destino)
+    """Baixa só os segundos do corte. Tenta yt-dlp --download-sections e fallback direto via ffmpeg com reconnect."""
+    max_h = os.environ.get("CLIPPER_MAX_RES", "1440")
+    print(f"      baixando pedaço em {max_h}p60 (Ultra-HD)…", flush=True)
+    formatos = [formato_download()]
+    if max_h != "1080":
+        formatos.append("bv*[height<=1080]+ba/b[height<=1080]/best")
+    else:
+        formatos.append("best")
+
+    ultimo_erro = ""
+    for fmt in formatos:
+        for usar_mkv in (True, False):
+            ext_merge = "mkv" if usar_mkv else "mp4"
+            r = subprocess.run(
+                ytdlp() + ["-f", fmt, "--no-playlist", "--no-warnings", "--download-sections",
+                           f"*{s:.2f}-{e:.2f}", "--merge-output-format", ext_merge,
+                           "-o", str(destino), url],
+                capture_output=True, text=True, timeout=1800,
+            )
+            if r.returncode != 0 and r.stderr:
+                ultimo_erro = r.stderr.strip().splitlines()[-1]
+            if destino.exists() and tem_video(destino):
+                return
+            for ext in ("mkv", "webm", "mp4", "part"):
+                cand = destino.parent / f"{destino.name}.{ext}"
+                if cand.exists() and tem_video(cand):
+                    cand.replace(destino)
+                    return
+                cand2 = destino.with_suffix(f".{ext}")
+                if cand2 != destino and cand2.exists() and tem_video(cand2):
+                    cand2.replace(destino)
+                    return
+            destino.unlink(missing_ok=True)
+
+        print("      tentando de outro jeito (pulando direto pro minuto do corte)…", flush=True)
+        r = subprocess.run(ytdlp() + ["-f", fmt, "-g", "--no-playlist", "--no-warnings", url],
+                           capture_output=True, text=True)
+        if r.returncode != 0 and r.stderr:
+            ultimo_erro = r.stderr.strip().splitlines()[-1]
+        links = [l.strip() for l in r.stdout.splitlines() if l.strip().startswith("http")]
+        if links:
+            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            entrada = []
+            for l in links[:2]:
+                entrada += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+                            "-user_agent", ua, "-ss", f"{s:.2f}", "-i", l]
+            mapa = ["-map", "0:v:0", "-map", f"{len(links[:2]) - 1}:a:0?"]
+            tmp_mkv = destino.with_suffix(".mkv")
+            try:
+                rodar(["ffmpeg", "-y", "-loglevel", "error", *entrada, "-t", f"{e - s:.2f}", *mapa,
+                       "-c", "copy", str(tmp_mkv)], timeout=1800)
+                if tmp_mkv.exists() and tem_video(tmp_mkv):
+                    tmp_mkv.replace(destino)
+                    return
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                tmp_mkv.unlink(missing_ok=True)
+            try:
+                rodar(["ffmpeg", "-y", "-loglevel", "error", *entrada, "-t", f"{e - s:.2f}", *mapa,
+                       "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-c:a", "aac", "-b:a", "192k", str(destino)],
+                      timeout=1800)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                pass
+        if destino.exists() and tem_video(destino):
             return
-    destino.unlink(missing_ok=True)
-    print("      tentando de outro jeito (pulando direto pro minuto do corte)…", flush=True)
-    r = subprocess.run(ytdlp() + ["-f", fmt, "-g", "--no-playlist", "--no-warnings", url],
-                       capture_output=True, text=True)
-    links = [l for l in r.stdout.split() if l.startswith("http")]
-    if links:
-        entrada = []
-        for l in links[:2]:
-            entrada += ["-ss", f"{s:.2f}", "-i", l]
-        mapa = ["-map", "0:v:0", "-map", f"{len(links[:2]) - 1}:a:0?"]
-        try:
-            rodar(["ffmpeg", "-y", "-loglevel", "error", *entrada, "-t", f"{e - s:.2f}", *mapa,
-                   "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-c:a", "aac", "-b:a", "192k", destino],
-                  timeout=1800)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            pass
-    if destino.exists() and tem_video(destino):
-        return
-    destino.unlink(missing_ok=True)
-    raise SystemExit("NÃO CONSEGUI BAIXAR esse pedaço do vídeo. Rode 'instalar' (atualiza o baixador) e depois "
+        destino.unlink(missing_ok=True)
+
+    detalhe = f" ({ultimo_erro})" if ultimo_erro else ""
+    raise SystemExit("NÃO CONSEGUI BAIXAR esse pedaço do vídeo" + detalhe + ". Rode 'instalar' (atualiza o baixador) e depois "
                      "'fazer' de novo: os cortes que já ficaram prontos não são refeitos.")
 
 
