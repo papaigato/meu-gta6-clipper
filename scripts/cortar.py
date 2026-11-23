@@ -330,19 +330,31 @@ def baixar_trecho(pasta, url, s, e, destino):
         formatos.append("best")
 
     ultimo_erro = ""
+    base_sem_cookies = []
+    pular = False
+    for arg in ytdlp():
+        if pular:
+            pular = False
+            continue
+        if arg == "--cookies":
+            pular = True
+            continue
+        base_sem_cookies.append(arg)
+
     clientes = [
-        [],
-        ["--extractor-args", "youtube:player_client=tv,web_safari,web"],
-        ["--extractor-args", "youtube:player_client=mweb,web_embedded"],
+        (ytdlp(), []),
+        (ytdlp(), ["--extractor-args", "youtube:player_client=tv,web_safari,web"]),
+        (base_sem_cookies, ["--extractor-args", "youtube:player_client=ios,tv_simply,android_vr"]),
+        (base_sem_cookies, ["--extractor-args", "youtube:player_client=android_vr"]),
     ]
-    for extra in clientes:
+    for cmd_base, extra in clientes:
         for fmt in formatos:
             for usar_mkv in (True, False):
                 ext_merge = "mkv" if usar_mkv else "mp4"
                 r = subprocess.run(
-                    ytdlp() + [*extra, "-f", fmt, "--no-playlist", "--no-warnings", "--download-sections",
-                               f"*{s:.2f}-{e:.2f}", "--merge-output-format", ext_merge,
-                               "-o", str(destino), url],
+                    cmd_base + [*extra, "-f", fmt, "--no-playlist", "--no-warnings", "--download-sections",
+                                f"*{s:.2f}-{e:.2f}", "--merge-output-format", ext_merge,
+                                "-o", str(destino), url],
                     capture_output=True, text=True, timeout=1800,
                 )
                 if r.returncode != 0 and r.stderr:
@@ -361,7 +373,7 @@ def baixar_trecho(pasta, url, s, e, destino):
                 destino.unlink(missing_ok=True)
 
             print("      tentando de outro jeito (pulando direto pro minuto do corte)…", flush=True)
-            r = subprocess.run(ytdlp() + [*extra, "-f", fmt, "-g", "--no-playlist", "--no-warnings", url],
+            r = subprocess.run(cmd_base + [*extra, "-f", fmt, "-g", "--no-playlist", "--no-warnings", url],
                                capture_output=True, text=True)
             if r.returncode != 0 and r.stderr:
                 ultimo_erro = r.stderr.strip().splitlines()[-1]
