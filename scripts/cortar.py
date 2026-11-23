@@ -170,7 +170,7 @@ def duracao_video(video, padrao=45.0):
 
 
 def achar_camera(video):
-    """Procura o rosto em 14 quadros do trecho e devolve a caixa (x, y, l, a) do rosto mais frequente."""
+    """Procura o rosto em 24 quadros do trecho, agrupa por posição e devolve a caixa (x, y, l, a) da webcam."""
     import cv2
     import numpy as np
     cap = cv2.VideoCapture(str(video))
@@ -190,32 +190,49 @@ def achar_camera(video):
         cap.release()
         return W, H, None
     n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
-    esc = 960 / W
+    esc = 1280 / W
     h_esc = max(1, int(H * esc))
-    det = cv2.FaceDetectorYN.create(str(YUNET), "", (960, h_esc), 0.65)
-    caixas = []
-    for k in range(14):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(n * (k + 0.5) / 14))
+    det = cv2.FaceDetectorYN.create(str(YUNET), "", (1280, h_esc), 0.6)
+    amostras = 24
+    caixas, lidos = [], 0
+    for k in range(amostras):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(n * (k + 0.5) / amostras))
         ok, q = cap.read()
         if not ok:
             continue
-        _, rostos = det.detect(cv2.resize(q, (960, h_esc)))
+        lidos += 1
+        _, rostos = det.detect(cv2.resize(q, (1280, h_esc)))
         for r in rostos if rostos is not None else []:
-            if r[14] >= 0.65 and r[3] / esc > H * 0.04:
-                caixas.append([v / esc for v in r[:4]])
+            if r[14] >= 0.7 and r[3] / esc > H * 0.035:
+                caixas.append([v / esc for v in r[:4]] + [k])
     cap.release()
-    if len(caixas) < 3:
+    if len(caixas) < 3 or lidos == 0:
         return W, H, None
     c = np.array(caixas)
-    centros = c[:, :2] + c[:, 2:] / 2
-    med = np.median(centros, axis=0)
-    perto = c[np.linalg.norm(centros - med, axis=1) < W * 0.08]
-    if len(perto) < 3:
+    centros = c[:, :2] + c[:, 2:4] / 2
+    raio = W * 0.08
+    melhor, melhor_nota = None, -1.0
+    for i in range(len(c)):
+        viz = np.linalg.norm(centros - centros[i], axis=1) < raio
+        quadros = len(set(c[viz, 4].astype(int)))
+        borda = max(abs(centros[i, 0] - W / 2) / (W / 2), abs(centros[i, 1] - H / 2) / (H / 2))
+        nota = quadros + 0.5 * borda
+        if nota > melhor_nota:
+            melhor_nota, melhor = nota, viz
+    grupo = c[melhor]
+    if len(set(grupo[:, 4].astype(int))) < max(3, int(lidos * 0.3)):
         return W, H, None
-    rosto = np.median(perto, axis=0)
-    if rosto[3] > H * 0.30:  # rosto muito grande (>30% da tela) = podcast / live só de câmera
+    fh_med = float(np.median(grupo[:, 3]))
+    if fh_med > H * 0.30:  # rosto muito grande (>30% da tela) = podcast / live só de câmera
         return W, H, None
-    return W, H, [float(v) for v in rosto]
+    x1 = float(np.percentile(grupo[:, 0], 10))
+    y1 = float(np.percentile(grupo[:, 1], 10))
+    x2 = float(np.percentile(grupo[:, 0] + grupo[:, 2], 90))
+    y2 = float(np.percentile(grupo[:, 1] + grupo[:, 3], 90))
+    fcx, fcy = (x1 + x2) / 2, (y1 + y2) / 2
+    fw_eff = max(float(np.median(grupo[:, 2])), x2 - x1)
+    fh_eff = max(fh_med, y2 - y1)
+    return W, H, [fcx - fw_eff / 2, fcy - fh_eff / 2, fw_eff, fh_eff]
 
 
 def obter_camera_live(pasta, trecho, estilo):
@@ -257,29 +274,15 @@ def filtro(W, H, rosto):
     fx, fy, fw, fh = rosto
     fcx, fcy = fx + fw / 2, fy + fh / 2
 
-    # Caixa interna da webcam do streamer (corta estritamente dentro da moldura para eliminar bordas pretas/neon e jogo vazando)
-    cw = int(0.246 * W) // 2 * 2
-    ch = int(cw * CAM_H / L) // 2 * 2
+    # Centraliza o recorte no rosto detectado (em vez de canto fixo) para não cortar metade da cabeça
+    zoom = float(os.environ.get("CLIPPER_CAM_ZOOM", "4.8"))
+    cw = _par(min(max(fw * zoom, fh * 2.8 * L / CAM_H, 0.22 * W), 0.48 * W))
+    ch = _par(cw * CAM_H / L)
+    cx = _par(fcx - cw / 2)
+    cy = _par(fcy - 0.38 * ch)
 
-    if fcx < W * 0.5 and fcy < H * 0.5:
-        # Canto superior esquerdo (layout padrao Paulinho o Loko)
-        cx = int(0.012 * W) // 2 * 2
-        cy = int(0.022 * H) // 2 * 2
-    elif fcx >= W * 0.5 and fcy < H * 0.5:
-        # Canto superior direito
-        cx = int(W - 0.012 * W - cw) // 2 * 2
-        cy = int(0.022 * H) // 2 * 2
-    elif fcx < W * 0.5 and fcy >= H * 0.5:
-        # Canto inferior esquerdo
-        cx = int(0.012 * W) // 2 * 2
-        cy = int(H - 0.022 * H - ch) // 2 * 2
-    else:
-        # Canto inferior direito
-        cx = int(W - 0.012 * W - cw) // 2 * 2
-        cy = int(H - 0.022 * H - ch) // 2 * 2
-
-    cx = min(max(cx, 0), W - cw)
-    cy = min(max(cy, 0), H - ch)
+    cx = _par(min(max(cx, 0), W - cw))
+    cy = _par(min(max(cy, 0), H - ch))
 
     gw = int(min(W, H * L / JOGO_H)) // 2 * 2
     gx = int((W - gw) / 2) // 2 * 2
