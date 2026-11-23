@@ -396,7 +396,7 @@ def escrever_ass(caminho, titulo, palavras, dur, com_camera):
 # ================================================================ baixar só o pedaço
 def formato_download():
     max_h = os.environ.get("CLIPPER_MAX_RES", "1440")
-    return f"bv*[height<={max_h}]+ba/b[height<={max_h}]/best"
+    return f"bv*[height<={max_h}][vcodec!^=av01]+ba/bv*[height<={max_h}]+ba/b[height<={max_h}]/best"
 
 
 def tem_video(arq):
@@ -428,7 +428,7 @@ def baixar_trecho(pasta, url, s, e, destino, silencioso=False):
         print(f"      baixando pedaço em {max_h}p60 (stream copy turbo)…", flush=True)
     formatos = [formato_download()]
     if max_h != "1080":
-        formatos.append("bv*[height<=1080]+ba/b[height<=1080]/best")
+        formatos.append("bv*[height<=1080][vcodec!^=av01]+ba/bv*[height<=1080]+ba/b[height<=1080]/best")
     else:
         formatos.append("best")
     destino.parent.mkdir(parents=True, exist_ok=True)
